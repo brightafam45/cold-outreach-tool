@@ -26,7 +26,7 @@ import type { AIProvider } from '@/lib/ai/provider'
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
-    const { input, aiProvider = 'ollama', aiModel = 'llama3.2' } = body as {
+    const { input, aiProvider = 'groq', aiModel = 'llama3.2' } = body as {
       input: string
       aiProvider?: AIProvider
       aiModel?: string
