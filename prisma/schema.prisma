@@ -1,0 +1,79 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  password  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  searches  Search[]
+  settings  Settings?
+}
+
+model Settings {
+  id           String  @id @default(cuid())
+  userId       String  @unique
+  user         User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  aiProvider   String  @default("ollama")
+  claudeApiKey String?
+  ollamaModel  String  @default("llama3.2")
+}
+
+model Search {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  input       String
+  companyName String?
+  companyUrl  String?
+  companyType String?
+  industry    String?
+  status      String    @default("pending")
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  contacts    Contact[]
+  pitches     Pitch[]
+  drafts      Draft[]
+}
+
+model Contact {
+  id          String  @id @default(cuid())
+  searchId    String
+  search      Search  @relation(fields: [searchId], references: [id], onDelete: Cascade)
+  name        String
+  title       String?
+  email       String?
+  emailStatus String?
+  linkedinUrl String?
+  confidence  Int     @default(0)
+  rank        Int     @default(0)
+}
+
+model Pitch {
+  id         String @id @default(cuid())
+  searchId   String
+  search     Search @relation(fields: [searchId], references: [id], onDelete: Cascade)
+  title      String
+  angle      String
+  rationale  String
+  format     String?
+}
+
+model Draft {
+  id        String   @id @default(cuid())
+  searchId  String
+  search    Search   @relation(fields: [searchId], references: [id], onDelete: Cascade)
+  contactId String?
+  channel   String
+  subject   String?
+  body      String
+  version   Int      @default(1)
+  createdAt DateTime @default(now())
+}
