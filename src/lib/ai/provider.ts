@@ -1,9 +1,10 @@
 /**
  * AI Provider abstraction.
- * Supports Claude API (default) and Ollama (free, local).
+ * Supports Groq (free), Claude API, and Ollama (local).
+ * Default: Groq (free, fast, no credit card needed)
  */
 
-export type AIProvider = 'ollama' | 'claude'
+export type AIProvider = 'groq' | 'claude' | 'ollama'
 
 interface ChatMessage {
   role: 'system' | 'user' | 'assistant'
@@ -15,11 +16,39 @@ interface AIResponse {
   provider: AIProvider
 }
 
+// ── Groq (free) ───────────────────────────────────────────────────────────────
+
+async function chatWithGroq(messages: ChatMessage[]): Promise<string> {
+  const apiKey = process.env.GROQ_API_KEY
+  if (!apiKey) throw new Error('GROQ_API_KEY is not set — sign up free at groq.com')
+
+  const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: 'llama-3.3-70b-versatile',
+      max_tokens: 4096,
+      messages,
+    }),
+  })
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(`Groq API error: ${res.status} — ${JSON.stringify(err)}`)
+  }
+
+  const data = await res.json()
+  return data.choices?.[0]?.message?.content ?? ''
+}
+
 // ── Claude API ────────────────────────────────────────────────────────────────
 
 async function chatWithClaude(messages: ChatMessage[]): Promise<string> {
   const apiKey = process.env.CLAUDE_API_KEY
-  if (!apiKey) throw new Error('CLAUDE_API_KEY is not set — add it to your environment variables')
+  if (!apiKey) throw new Error('CLAUDE_API_KEY is not set')
 
   const system = messages.find((m) => m.role === 'system')?.content
   const userMessages = messages.filter((m) => m.role !== 'system')
@@ -51,7 +80,7 @@ async function chatWithClaude(messages: ChatMessage[]): Promise<string> {
   return data.content?.[0]?.text ?? ''
 }
 
-// ── Ollama (local fallback) ───────────────────────────────────────────────────
+// ── Ollama (local) ────────────────────────────────────────────────────────────
 
 async function chatWithOllama(
   messages: ChatMessage[],
@@ -74,33 +103,31 @@ async function chatWithOllama(
 
 // ── Main export ───────────────────────────────────────────────────────────────
 
-/**
- * Send a chat prompt to whichever AI provider is configured.
- * @param messages  Array of system/user/assistant messages
- * @param provider  "claude" | "ollama" — defaults to "claude"
- * @param model     Ollama model name (ignored for Claude)
- */
 export async function chat(
   messages: ChatMessage[],
-  provider: AIProvider = 'claude',
+  provider: AIProvider = 'groq',
   model = 'llama3.2'
 ): Promise<AIResponse> {
-  if (provider === 'ollama') {
-    const text = await chatWithOllama(messages, model)
-    return { text, provider: 'ollama' }
+  switch (provider) {
+    case 'claude': {
+      const text = await chatWithClaude(messages)
+      return { text, provider: 'claude' }
+    }
+    case 'ollama': {
+      const text = await chatWithOllama(messages, model)
+      return { text, provider: 'ollama' }
+    }
+    default: {
+      const text = await chatWithGroq(messages)
+      return { text, provider: 'groq' }
+    }
   }
-
-  const text = await chatWithClaude(messages)
-  return { text, provider: 'claude' }
 }
 
-/**
- * Simple single-prompt helper.
- */
 export async function prompt(
   systemPrompt: string,
   userPrompt: string,
-  provider: AIProvider = 'claude',
+  provider: AIProvider = 'groq',
   model = 'llama3.2'
 ): Promise<string> {
   const res = await chat(
