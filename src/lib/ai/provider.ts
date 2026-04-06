@@ -1,7 +1,6 @@
 /**
  * AI Provider abstraction.
- * Supports Ollama (free, local) and Claude API.
- * Switch via user settings — default is Ollama.
+ * Supports Claude API (default) and Ollama (free, local).
  */
 
 export type AIProvider = 'ollama' | 'claude'
@@ -16,7 +15,43 @@ interface AIResponse {
   provider: AIProvider
 }
 
-// ── Ollama ────────────────────────────────────────────────────────────────────
+// ── Claude API ────────────────────────────────────────────────────────────────
+
+async function chatWithClaude(messages: ChatMessage[]): Promise<string> {
+  const apiKey = process.env.CLAUDE_API_KEY
+  if (!apiKey) throw new Error('CLAUDE_API_KEY is not set — add it to your environment variables')
+
+  const system = messages.find((m) => m.role === 'system')?.content
+  const userMessages = messages.filter((m) => m.role !== 'system')
+
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 4096,
+      ...(system ? { system } : {}),
+      messages: userMessages.map((m) => ({
+        role: m.role,
+        content: m.content,
+      })),
+    }),
+  })
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(`Claude API error: ${res.status} — ${JSON.stringify(err)}`)
+  }
+
+  const data = await res.json()
+  return data.content?.[0]?.text ?? ''
+}
+
+// ── Ollama (local fallback) ───────────────────────────────────────────────────
 
 async function chatWithOllama(
   messages: ChatMessage[],
@@ -37,62 +72,26 @@ async function chatWithOllama(
   return data.message?.content ?? ''
 }
 
-// ── Claude API ────────────────────────────────────────────────────────────────
-
-async function chatWithClaude(messages: ChatMessage[]): Promise<string> {
-  const apiKey = process.env.CLAUDE_API_KEY
-  if (!apiKey) throw new Error('CLAUDE_API_KEY is not set')
-
-  const system = messages.find((m) => m.role === 'system')?.content
-  const userMessages = messages.filter((m) => m.role !== 'system')
-
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-    },
-    body: JSON.stringify({
-      model: 'claude-opus-4-6',
-      max_tokens: 4096,
-      ...(system ? { system } : {}),
-      messages: userMessages.map((m) => ({
-        role: m.role,
-        content: m.content,
-      })),
-    }),
-  })
-
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}))
-    throw new Error(`Claude API error: ${res.status} — ${JSON.stringify(err)}`)
-  }
-
-  const data = await res.json()
-  return data.content?.[0]?.text ?? ''
-}
-
 // ── Main export ───────────────────────────────────────────────────────────────
 
 /**
  * Send a chat prompt to whichever AI provider is configured.
  * @param messages  Array of system/user/assistant messages
- * @param provider  "ollama" | "claude" — defaults to env or "ollama"
+ * @param provider  "claude" | "ollama" — defaults to "claude"
  * @param model     Ollama model name (ignored for Claude)
  */
 export async function chat(
   messages: ChatMessage[],
-  provider: AIProvider = 'ollama',
+  provider: AIProvider = 'claude',
   model = 'llama3.2'
 ): Promise<AIResponse> {
-  if (provider === 'claude') {
-    const text = await chatWithClaude(messages)
-    return { text, provider: 'claude' }
+  if (provider === 'ollama') {
+    const text = await chatWithOllama(messages, model)
+    return { text, provider: 'ollama' }
   }
 
-  const text = await chatWithOllama(messages, model)
-  return { text, provider: 'ollama' }
+  const text = await chatWithClaude(messages)
+  return { text, provider: 'claude' }
 }
 
 /**
@@ -101,7 +100,7 @@ export async function chat(
 export async function prompt(
   systemPrompt: string,
   userPrompt: string,
-  provider: AIProvider = 'ollama',
+  provider: AIProvider = 'claude',
   model = 'llama3.2'
 ): Promise<string> {
   const res = await chat(

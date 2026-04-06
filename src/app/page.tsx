@@ -54,7 +54,7 @@ function HomeInner() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           input: input.trim(),
-          aiProvider: 'ollama',
+          aiProvider: 'claude',
           aiModel: 'llama3.2',
         }),
       })
