@@ -1,6 +1,8 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect, Suspense } from 'react'
+import { useSearchParams } from 'next/navigation'
+import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -20,12 +22,19 @@ const STEPS = [
   'Wrapping up…',
 ]
 
-export default function Home() {
-  const [input, setInput] = useState('')
+function HomeInner() {
+  const searchParams = useSearchParams()
+  const [input, setInput] = useState(searchParams.get('company') ?? '')
   const [state, setState] = useState<SearchState>('idle')
   const [stepIndex, setStepIndex] = useState(0)
   const [results, setResults] = useState<Record<string, unknown> | null>(null)
   const [error, setError] = useState<string | null>(null)
+
+  // Auto-run if company param is passed from Discover page
+  useEffect(() => {
+    const company = searchParams.get('company')
+    if (company) runSearch()
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const runSearch = async () => {
     if (!input.trim()) return
@@ -76,9 +85,11 @@ export default function Home() {
             <span className="text-xl font-black tracking-tight">OutreachAI</span>
             <Badge variant="secondary" className="text-[10px]">Beta</Badge>
           </div>
-          <span className="text-xs text-muted-foreground">
-            Find decision makers · Generate pitches · Draft messages
-          </span>
+          <nav className="flex gap-4 text-sm">
+            <Link href="/" className="font-medium">Search</Link>
+            <Link href="/discover" className="text-muted-foreground hover:text-foreground">Discover</Link>
+            <Link href="/history" className="text-muted-foreground hover:text-foreground">History</Link>
+          </nav>
         </div>
       </header>
 
@@ -168,5 +179,13 @@ export default function Home() {
         )}
       </main>
     </div>
+  )
+}
+
+export default function Home() {
+  return (
+    <Suspense>
+      <HomeInner />
+    </Suspense>
   )
 }
