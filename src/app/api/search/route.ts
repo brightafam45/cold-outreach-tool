@@ -26,15 +26,14 @@ import type { AIProvider } from '@/lib/ai/provider'
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
-    const { input, userId, aiProvider = 'ollama', aiModel = 'llama3.2' } = body as {
+    const { input, aiProvider = 'ollama', aiModel = 'llama3.2' } = body as {
       input: string
-      userId?: string
       aiProvider?: AIProvider
       aiModel?: string
     }
 
     if (!input?.trim()) {
-      return NextResponse.json({ error: 'Company name or URL is required' }, { status: 400 })
+      return NextResponse.json({ error: 'A website URL is required' }, { status: 400 })
     }
 
     // ── 1. Create search record ───────────────────────────────────────────
@@ -42,7 +41,6 @@ export async function POST(req: NextRequest) {
       data: {
         input: input.trim(),
         status: 'running',
-        userId: userId ?? 'anonymous',
       },
     })
 

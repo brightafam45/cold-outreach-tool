@@ -100,8 +100,8 @@ function HomeInner() {
             Find your next writing client
           </h1>
           <p className="text-muted-foreground text-sm max-w-xl">
-            Enter a company name or website URL. We&apos;ll find the right people to contact,
-            analyze their content, generate pitch ideas, and draft your outreach message.
+            Paste a company website URL. We&apos;ll find the right decision makers, analyze their content,
+            generate pitch ideas, and draft your outreach message.
           </p>
 
           <div className="flex gap-2 max-w-xl">
@@ -109,9 +109,10 @@ function HomeInner() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && runSearch()}
-              placeholder="e.g. Stripe, Notion, or stripe.com"
+              placeholder="e.g. stripe.com or https://notion.so"
               className="flex-1"
               disabled={state === 'loading'}
+              type="url"
             />
             <Button
               onClick={runSearch}
@@ -166,15 +167,15 @@ function HomeInner() {
         {state === 'idle' && (
           <div className="border border-dashed border-border rounded-xl p-10 text-center space-y-2">
             <p className="text-muted-foreground text-sm">
-              Try: <button onClick={() => setInput('Notion')} className="underline hover:text-foreground">Notion</button>
+              Try: <button onClick={() => setInput('notion.so')} className="underline hover:text-foreground">notion.so</button>
               {' · '}
-              <button onClick={() => setInput('HubSpot')} className="underline hover:text-foreground">HubSpot</button>
+              <button onClick={() => setInput('hubspot.com')} className="underline hover:text-foreground">hubspot.com</button>
               {' · '}
-              <button onClick={() => setInput('linear.app')} className="underline hover:text-foreground">Linear</button>
+              <button onClick={() => setInput('linear.app')} className="underline hover:text-foreground">linear.app</button>
               {' · '}
-              <button onClick={() => setInput('Copy.ai')} className="underline hover:text-foreground">Copy.ai</button>
+              <button onClick={() => setInput('copy.ai')} className="underline hover:text-foreground">copy.ai</button>
             </p>
-            <p className="text-xs text-muted-foreground">Works with company names or URLs</p>
+            <p className="text-xs text-muted-foreground">Paste any company website URL</p>
           </div>
         )}
       </main>
