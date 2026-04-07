@@ -112,8 +112,9 @@ rank 1 = best contact. confidence = 0-100.`
  */
 export async function findContacts(
   companyNameOrUrl: string,
-  aiProvider: AIProvider = 'ollama',
-  aiModel = 'llama3.2'
+  aiProvider: AIProvider = 'groq',
+  aiModel = 'llama3.2',
+  options: { skipEmailVerification?: boolean } = {}
 ): Promise<FoundContact[]> {
   const domain = extractDomain(companyNameOrUrl)
   const companyName = companyNameOrUrl.includes('.')
@@ -122,33 +123,30 @@ export async function findContacts(
 
   const rawContacts: Array<{ name: string; title: string; linkedinUrl?: string; source: string }> = []
 
-  // ── Step 1: LinkedIn via Google ──────────────────────────────────────────
-  try {
-    const linkedinResults = await findLinkedInProfiles(companyName, [
+  // ── Step 1 & 2: LinkedIn via Google + Team/About page (parallel) ─────────
+  const [linkedinResults, teamPageUrl] = await Promise.all([
+    findLinkedInProfiles(companyName, [
       'Head of Content', 'Content Manager', 'Content Director',
       'Marketing Director', 'VP of Marketing', 'CMO', 'Editor',
       'Founder', 'CEO',
-    ])
+    ]).catch(() => []),
+    findTeamPage(domain).catch(() => null),
+  ])
 
-    for (const r of linkedinResults) {
-      const parsed = parseLinkedInResult(r.title, r.snippet)
-      if (parsed && TARGET_TITLE_PATTERN.test(parsed.jobTitle)) {
-        rawContacts.push({
-          name: parsed.name,
-          title: parsed.jobTitle,
-          linkedinUrl: r.url,
-          source: 'linkedin-google',
-        })
-      }
+  for (const r of linkedinResults) {
+    const parsed = parseLinkedInResult(r.title, r.snippet)
+    if (parsed && TARGET_TITLE_PATTERN.test(parsed.jobTitle)) {
+      rawContacts.push({
+        name: parsed.name,
+        title: parsed.jobTitle,
+        linkedinUrl: r.url,
+        source: 'linkedin-google',
+      })
     }
-  } catch {
-    // Continue even if Google search fails
   }
 
-  // ── Step 2: Team/About page ──────────────────────────────────────────────
-  try {
-    const teamPageUrl = await findTeamPage(domain)
-    if (teamPageUrl) {
+  if (teamPageUrl) {
+    try {
       const teamContacts = await scrapeTeamPage(teamPageUrl)
       for (const c of teamContacts) {
         if (!c.title || TARGET_TITLE_PATTERN.test(c.title)) {
@@ -160,9 +158,7 @@ export async function findContacts(
           })
         }
       }
-    }
-  } catch {
-    // Continue
+    } catch { /* continue */ }
   }
 
   // ── Step 3: Deduplicate ──────────────────────────────────────────────────
@@ -199,15 +195,17 @@ export async function findContacts(
     let email: string | null = null
     let emailStatus = 'unverified'
 
-    // Only try email verification if we have both first + last name
-    if (firstName && lastName) {
-      const guesses = guessEmails(firstName, lastName, domain)
-      const topGuesses = guesses.slice(0, 5).map((g) => g.email)
+    if (!options.skipEmailVerification) {
+      // Only try email verification if we have both first + last name
+      if (firstName && lastName) {
+        const guesses = guessEmails(firstName, lastName, domain)
+        const topGuesses = guesses.slice(0, 5).map((g) => g.email)
 
-      const verified = await findBestEmail(topGuesses)
-      if (verified) {
-        email = verified.email
-        emailStatus = verified.status
+        const verified = await findBestEmail(topGuesses)
+        if (verified) {
+          email = verified.email
+          emailStatus = verified.status
+        }
       }
     }
 

@@ -12,14 +12,11 @@ type SearchState = 'idle' | 'loading' | 'done' | 'error'
 
 const STEPS = [
   'Resolving company info…',
-  'Searching for decision makers…',
-  'Finding LinkedIn profiles…',
+  'Finding decision makers…',
   'Verifying email addresses…',
-  'Analyzing blog and content…',
-  'Researching competitors…',
+  'Analyzing blog content…',
   'Generating pitch ideas…',
   'Drafting outreach messages…',
-  'Wrapping up…',
 ]
 
 function HomeInner() {
@@ -43,34 +40,38 @@ function HomeInner() {
     setResults(null)
     setStepIndex(0)
 
-    // Advance step labels during loading for UX feedback
-    const interval = setInterval(() => {
-      setStepIndex((prev) => Math.min(prev + 1, STEPS.length - 1))
-    }, 4000)
+    const headers = { 'Content-Type': 'application/json' }
 
     try {
-      const res = await fetch('/api/search', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          input: input.trim(),
-          aiProvider: 'groq',
-          aiModel: 'llama3.2',
-        }),
-      })
+      // Step 1: Init
+      const initRes = await fetch('/api/search/init', { method: 'POST', headers, body: JSON.stringify({ input: input.trim() }) })
+      if (!initRes.ok) throw new Error((await initRes.json()).error ?? 'Init failed')
+      const { searchId } = await initRes.json()
+      setStepIndex(1)
 
-      clearInterval(interval)
+      // Step 2: Find contacts
+      await fetch('/api/search/contacts', { method: 'POST', headers, body: JSON.stringify({ searchId }) })
+      setStepIndex(2)
 
-      if (!res.ok) {
-        const err = await res.json()
-        throw new Error(err.error ?? 'Search failed')
-      }
+      // Step 3: Verify emails
+      await fetch('/api/search/verify', { method: 'POST', headers, body: JSON.stringify({ searchId }) })
+      setStepIndex(3)
 
-      const data = await res.json()
+      // Step 4: Analyze blog
+      await fetch('/api/search/analyze', { method: 'POST', headers, body: JSON.stringify({ searchId }) })
+      setStepIndex(4)
+
+      // Step 5: Generate pitches
+      await fetch('/api/search/pitches', { method: 'POST', headers, body: JSON.stringify({ searchId }) })
+      setStepIndex(5)
+
+      // Step 6: Draft messages — returns full results
+      const draftsRes = await fetch('/api/search/drafts', { method: 'POST', headers, body: JSON.stringify({ searchId }) })
+      if (!draftsRes.ok) throw new Error((await draftsRes.json()).error ?? 'Drafting failed')
+      const data = await draftsRes.json()
       setResults(data)
       setState('done')
     } catch (err) {
-      clearInterval(interval)
       setError(err instanceof Error ? err.message : 'Something went wrong')
       setState('error')
     }
@@ -138,7 +139,7 @@ function HomeInner() {
               />
             </div>
             <p className="text-xs text-muted-foreground">
-              This takes 30–90 seconds — we&apos;re scraping the web so you don&apos;t have to.
+              This takes 30–60 seconds — we&apos;re scraping the web so you don&apos;t have to.
             </p>
           </div>
         )}
