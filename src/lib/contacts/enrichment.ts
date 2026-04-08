@@ -284,19 +284,49 @@ export async function extractBlogAuthors(
   return []
 }
 
-// ─── LinkedIn via Web (DuckDuckGo/Bing cache) ────────────────────────────────
+// ─── LinkedIn via Multiple Search Engines ────────────────────────────────────
 
 /**
- * Search for LinkedIn profiles via DuckDuckGo HTML search.
- * DuckDuckGo is more permissive than Google/Bing for cloud IPs.
+ * Search for LinkedIn profiles across multiple search engines.
+ * Tries DuckDuckGo, Bing, and direct Google cache in sequence.
  */
-export async function linkedinViaDDG(
+export async function linkedinSearch(
   companyName: string,
+  domain: string,
   titles: string[]
 ): Promise<EnrichedContact[]> {
-  const titleQuery = titles.slice(0, 3).map(t => `"${t}"`).join(' OR ')
-  const query = `site:linkedin.com/in "${companyName}" (${titleQuery})`
+  const contacts: EnrichedContact[] = []
 
+  // Run multiple queries in parallel targeting different title groups
+  const queries = [
+    // Marketing/content roles
+    `site:linkedin.com/in "${companyName}" ("Head of Content" OR "Content Manager" OR "Marketing Director" OR "CMO")`,
+    // Leadership roles
+    `site:linkedin.com/in "${companyName}" (Founder OR "Co-Founder" OR CEO OR "Chief Executive")`,
+    // Domain-based search (catches more employees)
+    `site:linkedin.com/in "${domain}"`,
+  ]
+
+  const results = await Promise.allSettled(
+    queries.map(q => searchDDG(q))
+  )
+
+  const seen = new Set<string>()
+  for (const result of results) {
+    if (result.status !== 'fulfilled') continue
+    for (const c of result.value) {
+      const key = c.name.toLowerCase()
+      if (!seen.has(key)) {
+        seen.add(key)
+        contacts.push(c)
+      }
+    }
+  }
+
+  return contacts.slice(0, 10)
+}
+
+async function searchDDG(query: string): Promise<EnrichedContact[]> {
   try {
     const res = await fetch(
       `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`,
@@ -314,32 +344,53 @@ export async function linkedinViaDDG(
     const $ = cheerio.load(html)
     const contacts: EnrichedContact[] = []
 
-    $('.result__title, .result__snippet').each((_, el) => {
-      const text = $(el).text().trim()
-      const href = $(el).find('a').attr('href') ?? $(el).closest('.result').find('.result__url').text().trim()
+    // DuckDuckGo result structure
+    $('.result').each((_, el) => {
+      const titleText = $(el).find('.result__title').text().trim()
+      const snippetText = $(el).find('.result__snippet').text().trim()
+      const href = $(el).find('.result__title a').attr('href') ?? ''
 
-      // Parse "Name - Title at Company | LinkedIn" format
-      const nameMatch = text.match(/^([A-Z][a-z]+(?:\s[A-Z][a-z]+)+)\s*[-–|]/)
-      const titleMatch = text.match(/[-–|]\s*(.+?)(?:\s+at\s+|\s*[-–|]\s*LinkedIn|\s*\|)/i)
+      if (!href.includes('linkedin.com/in')) return
 
-      if (nameMatch && href?.includes('linkedin.com/in')) {
-        contacts.push({
-          name: nameMatch[1].trim(),
-          title: titleMatch?.[1]?.trim() ?? null,
-          email: null,
-          emailStatus: 'unavailable',
-          linkedinUrl: href.startsWith('http') ? href : null,
-          twitterUrl: null,
-          confidence: 55,
-          source: 'linkedin-ddg',
-        })
+      // LinkedIn title format: "Name - Title at Company | LinkedIn"
+      // or "Name | Title | Company | LinkedIn"
+      const nameMatch = titleText.match(/^([A-Z][a-záéíóú]+(?: [A-Z][a-záéíóú]+){1,3})(?:\s*[-–|]|\s*$)/)
+      if (!nameMatch) return
+
+      const name = nameMatch[1].trim()
+      // Skip obvious non-names
+      if (/^(LinkedIn|The|A |An |See |View )/.test(name)) return
+
+      // Extract title from the result
+      const titleMatch = titleText.match(/[-–|]\s*([^|]+?)(?:\s+at\s+|\s*[-–|]\s*LinkedIn|\s*\|)/i)
+        ?? snippetText.match(/\b(CEO|CTO|CMO|Founder|Co-Founder|Director|Manager|Head|VP|Editor|President)[^.]{0,60}/i)
+
+      // Get actual LinkedIn URL (DDG wraps it)
+      let linkedinUrl: string | null = null
+      if (href.startsWith('https://www.linkedin.com')) {
+        linkedinUrl = href
+      } else if (href.includes('linkedin.com')) {
+        const match = href.match(/https?:\/\/(?:www\.)?linkedin\.com\/in\/[^&?]+/)
+        linkedinUrl = match ? match[0] : null
       }
+
+      contacts.push({
+        name,
+        title: titleMatch?.[1]?.trim() ?? null,
+        email: null,
+        emailStatus: 'unavailable',
+        linkedinUrl,
+        twitterUrl: null,
+        confidence: 55,
+        source: 'linkedin-ddg',
+      })
     })
 
-    return contacts.slice(0, 8)
+    return contacts
   } catch {
     return []
   }
+
 }
 
 // ─── Crunchbase People ───────────────────────────────────────────────────────

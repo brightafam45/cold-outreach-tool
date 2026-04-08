@@ -18,7 +18,7 @@ import {
   githubOrgMembers,
   rdapLookup,
   extractBlogAuthors,
-  linkedinViaDDG,
+  linkedinSearch,
   crunchbasePeople,
   generateEmailGuesses,
   type EnrichedContact,
@@ -215,16 +215,13 @@ export async function findContacts(
     crunchbaseContacts,
     { contacts: siteContacts, siteEmails },
   ] = await Promise.all([
-    hunterSearch(domain).catch(() => []),
-    githubOrgMembers(domain).catch(() => []),
-    linkedinViaDDG(companyName, [
-      'Head of Content', 'Content Manager', 'Marketing Director',
-      'CMO', 'Founder', 'CEO', 'Editor',
-    ]).catch(() => []),
-    rdapLookup(domain).catch(() => []),
-    extractBlogAuthors(domain, null).catch(() => []),
-    crunchbasePeople(companyName).catch(() => []),
-    scrapeWebsite(domain).catch(() => ({ contacts: [], siteEmails: [] })),
+    hunterSearch(domain).catch(() => []),                          // best — needs free API key
+    githubOrgMembers(domain).catch(() => []),                       // free, unlimited
+    linkedinSearch(companyName, domain, TARGET_TITLES).catch(() => []), // free, unlimited
+    rdapLookup(domain).catch(() => []),                             // free, unlimited
+    extractBlogAuthors(domain, null).catch(() => []),               // free, unlimited
+    crunchbasePeople(companyName).catch(() => []),                  // free, unlimited
+    scrapeWebsite(domain).catch(() => ({ contacts: [], siteEmails: [] })), // free, unlimited
   ])
 
   // ── Merge all sources ────────────────────────────────────────────────────

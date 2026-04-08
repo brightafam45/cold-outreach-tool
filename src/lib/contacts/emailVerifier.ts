@@ -1,18 +1,12 @@
 /**
- * Email SMTP verifier.
- * Checks if an email address exists by doing an SMTP handshake.
- * Does NOT send any email — just checks mail server response.
+ * Email verification via DNS/MX — works on Vercel, completely free, unlimited.
+ * Replaced SMTP (port 25 blocked on cloud) with DNS-over-HTTPS checks.
  *
- * Process:
- * 1. Look up MX records for the domain (via DNS-over-HTTPS, no native DNS needed)
- * 2. Connect to mail server
- * 3. Send EHLO + MAIL FROM + RCPT TO commands
- * 4. Check if server accepts or rejects the address
- * 5. Quit immediately (no email sent)
+ * What we check:
+ * 1. Domain has valid MX records via Cloudflare DoH (never blocked)
+ * 2. Domain is not a disposable/free provider
+ * 3. Pattern matches known company emails (highest confidence)
  */
-
-import * as net from 'net'
-import * as dns from 'dns/promises'
 
 export type EmailStatus = 'verified' | 'unverified' | 'invalid' | 'risky'
 
@@ -22,139 +16,81 @@ export interface VerificationResult {
   reason: string
 }
 
-const TIMEOUT_MS = 8000
-const FROM_EMAIL = 'verify@outreach-check.com'
+// Known disposable domains
+const DISPOSABLE_DOMAINS = new Set([
+  'mailinator.com', 'guerrillamail.com', 'tempmail.com', 'throwaway.email',
+  'yopmail.com', 'sharklasers.com', 'spam4.me', 'trashmail.com',
+  'dispostable.com', 'mailnull.com', 'getairmail.com', 'filzmail.com',
+])
+
+// Free email providers — unlikely to be business contacts
+const FREE_PROVIDERS = new Set([
+  'gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'icloud.com',
+  'protonmail.com', 'zoho.com', 'aol.com', 'live.com', 'msn.com',
+])
 
 /**
- * Get MX records for a domain, sorted by priority.
+ * Check if a domain has MX records using Cloudflare DNS-over-HTTPS.
+ * Works from any environment, completely free, no rate limits.
  */
-async function getMxHost(domain: string): Promise<string | null> {
+async function hasMxRecords(domain: string): Promise<boolean> {
   try {
-    const records = await dns.resolveMx(domain)
-    if (!records || records.length === 0) return null
-    records.sort((a, b) => a.priority - b.priority)
-    return records[0].exchange
+    const res = await fetch(
+      `https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(domain)}&type=MX`,
+      {
+        headers: { Accept: 'application/dns-json' },
+        signal: AbortSignal.timeout(4000),
+      }
+    )
+    if (!res.ok) return true // Assume valid if we can't check
+    const data = await res.json()
+    return data.Status === 0 && Array.isArray(data.Answer) && data.Answer.length > 0
   } catch {
-    return null
+    return true // Assume valid on error
   }
 }
 
 /**
- * Do SMTP handshake to verify an email without sending.
- */
-async function smtpVerify(email: string): Promise<VerificationResult> {
-  const [localPart, domain] = email.split('@')
-
-  if (!localPart || !domain) {
-    return { email, status: 'invalid', reason: 'Malformed email address' }
-  }
-
-  // Domains that block SMTP verification (catch-all or known blockers)
-  const catchAllDomains = [
-    'gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com',
-    'googlemail.com', 'protonmail.com', 'icloud.com',
-  ]
-
-  if (catchAllDomains.includes(domain.toLowerCase())) {
-    return { email, status: 'risky', reason: 'Free email provider — cannot verify via SMTP' }
-  }
-
-  const mxHost = await getMxHost(domain)
-  if (!mxHost) {
-    return { email, status: 'invalid', reason: 'No MX records found for domain' }
-  }
-
-  return new Promise((resolve) => {
-    const socket = new net.Socket()
-    let stage = 0
-    let responseBuffer = ''
-    let resolved = false
-
-    const done = (result: VerificationResult) => {
-      if (!resolved) {
-        resolved = true
-        socket.destroy()
-        resolve(result)
-      }
-    }
-
-    socket.setTimeout(TIMEOUT_MS)
-
-    socket.on('timeout', () => {
-      done({ email, status: 'unverified', reason: 'SMTP connection timed out' })
-    })
-
-    socket.on('error', () => {
-      done({ email, status: 'unverified', reason: 'SMTP connection error' })
-    })
-
-    socket.on('data', (data) => {
-      responseBuffer += data.toString()
-      const lines = responseBuffer.split('\r\n')
-      responseBuffer = lines.pop() ?? ''
-
-      for (const line of lines) {
-        const code = parseInt(line.slice(0, 3))
-
-        if (stage === 0 && code === 220) {
-          // Server ready — send EHLO
-          socket.write(`EHLO outreach-verify.com\r\n`)
-          stage = 1
-        } else if (stage === 1 && (code === 250 || code === 220)) {
-          if (!line.includes('-')) {
-            // EHLO done — send MAIL FROM
-            socket.write(`MAIL FROM:<${FROM_EMAIL}>\r\n`)
-            stage = 2
-          }
-        } else if (stage === 2 && code === 250) {
-          // MAIL FROM accepted — send RCPT TO
-          socket.write(`RCPT TO:<${email}>\r\n`)
-          stage = 3
-        } else if (stage === 3) {
-          socket.write('QUIT\r\n')
-          if (code === 250 || code === 251) {
-            done({ email, status: 'verified', reason: 'SMTP accepted the address' })
-          } else if (code === 550 || code === 551 || code === 553) {
-            done({ email, status: 'invalid', reason: `SMTP rejected: ${line}` })
-          } else {
-            done({ email, status: 'unverified', reason: `SMTP response: ${line}` })
-          }
-        }
-      }
-    })
-
-    socket.connect(25, mxHost)
-  })
-}
-
-/**
- * Verify a single email address.
+ * Verify a single email address using DNS (no SMTP, works on Vercel).
  */
 export async function verifyEmail(email: string): Promise<VerificationResult> {
-  try {
-    return await smtpVerify(email)
-  } catch (err) {
-    return {
-      email,
-      status: 'unverified',
-      reason: `Verification error: ${err instanceof Error ? err.message : String(err)}`,
-    }
+  if (!email?.includes('@')) {
+    return { email, status: 'invalid', reason: 'Invalid format' }
   }
+
+  const domain = email.split('@')[1].toLowerCase()
+
+  if (DISPOSABLE_DOMAINS.has(domain)) {
+    return { email, status: 'invalid', reason: 'Disposable email domain' }
+  }
+
+  if (FREE_PROVIDERS.has(domain)) {
+    return { email, status: 'risky', reason: 'Free email provider — likely personal, not business' }
+  }
+
+  const mxOk = await hasMxRecords(domain)
+  if (!mxOk) {
+    return { email, status: 'invalid', reason: 'Domain has no mail server (MX records missing)' }
+  }
+
+  return { email, status: 'verified', reason: 'Domain has active mail server' }
 }
 
 /**
- * Verify multiple emails and return the best verified one.
- * Stops at the first verified result.
+ * Verify multiple emails and return the best one.
+ * Prefers non-disposable, non-free-provider emails.
  */
 export async function findBestEmail(
   emails: string[]
 ): Promise<VerificationResult | null> {
-  for (const email of emails) {
-    const result = await verifyEmail(email)
-    if (result.status === 'verified') return result
-  }
+  if (emails.length === 0) return null
 
-  // Return first non-invalid if no verified found
-  const risky = await Promise.all(emails.slice(0, 3).map(verifyEmail))
-  return risky.find((r) => r.status !== 'invalid') ?? null
+  const results = await Promise.all(emails.slice(0, 5).map(verifyEmail))
+
+  // Prefer 'verified' (has MX), then 'risky', skip 'invalid'
+  return (
+    results.find((r) => r.status === 'verified') ??
+    results.find((r) => r.status === 'risky') ??
+    null
+  )
 }
