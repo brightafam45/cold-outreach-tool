@@ -12,8 +12,10 @@ interface Contact {
   email: string | null
   emailStatus: string
   linkedinUrl: string | null
+  twitterUrl?: string | null
   confidence: number
   rank: number
+  source?: string
 }
 
 interface Pitch {
@@ -53,13 +55,28 @@ interface SearchResultData {
 }
 
 function EmailStatusBadge({ status }: { status: string }) {
-  const variants: Record<string, 'default' | 'secondary' | 'destructive' | 'outline'> = {
-    verified: 'default',
-    risky: 'secondary',
-    unverified: 'outline',
-    invalid: 'destructive',
+  const config: Record<string, { variant: 'default' | 'secondary' | 'destructive' | 'outline'; label: string }> = {
+    'verified-hunter':   { variant: 'default',     label: 'verified' },
+    'found-github':      { variant: 'default',     label: 'verified' },
+    'found-on-site':     { variant: 'default',     label: 'found on site' },
+    'found-whois':       { variant: 'secondary',   label: 'from whois' },
+    'pattern-inferred':  { variant: 'secondary',   label: 'pattern match' },
+    'guessed':           { variant: 'outline',     label: 'guessed' },
+    'unavailable':       { variant: 'outline',     label: 'not found' },
   }
-  return <Badge variant={variants[status] ?? 'outline'}>{status}</Badge>
+  const c = config[status] ?? { variant: 'outline' as const, label: status }
+  return <Badge variant={c.variant}>{c.label}</Badge>
+}
+
+const SOURCE_LABELS: Record<string, string> = {
+  'hunter.io': '🎯 Hunter.io',
+  'github': '🐙 GitHub',
+  'linkedin-ddg': '🔗 LinkedIn',
+  'team-page': '🌐 Team page',
+  'blog-author': '📝 Blog',
+  'whois': '📋 WHOIS',
+  'crunchbase': '💼 Crunchbase',
+  'site-email': '📧 Found on site',
 }
 
 function ContactCard({ contact, draft }: { contact: Contact; draft?: Draft }) {
@@ -86,11 +103,13 @@ function ContactCard({ contact, draft }: { contact: Contact; draft?: Draft }) {
         </div>
 
         <div className="flex flex-wrap gap-2 mt-2">
-          {contact.email && (
+          {contact.email ? (
             <div className="flex items-center gap-1.5">
-              <span className="text-xs text-muted-foreground">{contact.email}</span>
+              <span className="text-xs font-mono text-muted-foreground">{contact.email}</span>
               <EmailStatusBadge status={contact.emailStatus} />
             </div>
+          ) : (
+            <span className="text-xs text-muted-foreground/50 italic">No email found</span>
           )}
           {contact.linkedinUrl && (
             <a
@@ -101,6 +120,21 @@ function ContactCard({ contact, draft }: { contact: Contact; draft?: Draft }) {
             >
               LinkedIn ↗
             </a>
+          )}
+          {contact.twitterUrl && (
+            <a
+              href={contact.twitterUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs text-sky-600 hover:underline"
+            >
+              Twitter/X ↗
+            </a>
+          )}
+          {contact.source && (
+            <span className="text-xs text-muted-foreground/60">
+              via {SOURCE_LABELS[contact.source.split('+')[0]] ?? contact.source}
+            </span>
           )}
         </div>
       </CardHeader>
@@ -258,9 +292,23 @@ export default function SearchResults({ data }: { data: SearchResultData }) {
           Decision Makers ({contacts.length})
         </h3>
         {contacts.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            No contacts found. Try searching by URL instead of company name, or check the spelling.
-          </p>
+          <div className="border border-dashed border-border rounded-xl p-6 space-y-3">
+            <p className="text-sm text-muted-foreground">
+              No contacts found publicly for this company.
+            </p>
+            <p className="text-xs text-muted-foreground/70">
+              We searched: team page, GitHub, LinkedIn (via DuckDuckGo), blog authors, WHOIS, and Crunchbase.
+            </p>
+            <p className="text-xs text-muted-foreground/70">
+              <strong>To unlock 10x more contacts:</strong> Add a free{' '}
+              <a href="https://hunter.io" target="_blank" rel="noopener noreferrer" className="underline">Hunter.io</a>
+              {' '}API key to your environment variables as <code className="bg-muted px-1 rounded">HUNTER_API_KEY</code>.
+              Hunter has a free tier with 25 domain searches/month.
+            </p>
+            <p className="text-xs text-muted-foreground/70">
+              Also try: search by company URL instead of name (e.g. <code className="bg-muted px-1 rounded">stripe.com</code> not <code className="bg-muted px-1 rounded">Stripe</code>).
+            </p>
+          </div>
         ) : (
           <div className="space-y-4">
             {contacts.map((contact, i) => (
