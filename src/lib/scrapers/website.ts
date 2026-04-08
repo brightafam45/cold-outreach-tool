@@ -8,6 +8,26 @@ import * as cheerio from 'cheerio'
 const USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
 
+// Common team/about page URL patterns to probe
+const TEAM_PAGE_PATHS = [
+  '/about',
+  '/about-us',
+  '/team',
+  '/our-team',
+  '/people',
+  '/leadership',
+  '/company',
+  '/company/team',
+  '/company/about',
+  '/who-we-are',
+  '/about/team',
+  '/staff',
+  '/management',
+  '/founders',
+  '/the-team',
+  '/meet-the-team',
+]
+
 export interface RawContact {
   name: string
   title?: string
@@ -23,7 +43,7 @@ export interface BlogPost {
 }
 
 /**
- * Fetch HTML from a URL.
+ * Fetch HTML from a URL. Returns null on failure.
  */
 async function fetchHtml(url: string): Promise<string> {
   const res = await fetch(url, {
@@ -33,6 +53,80 @@ async function fetchHtml(url: string): Promise<string> {
 
   if (!res.ok) throw new Error(`Failed to fetch ${url}: ${res.status}`)
   return res.text()
+}
+
+async function fetchHtmlSafe(url: string): Promise<string | null> {
+  try {
+    return await fetchHtml(url)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Extract email addresses from HTML content.
+ * Finds mailto: links and email patterns in text.
+ */
+export function extractEmailsFromHtml(html: string, domain: string): string[] {
+  const emails = new Set<string>()
+  const $ = cheerio.load(html)
+
+  // Extract mailto: links
+  $('a[href^="mailto:"]').each((_, el) => {
+    const href = $(el).attr('href') ?? ''
+    const email = href.replace('mailto:', '').split('?')[0].trim().toLowerCase()
+    if (email && email.includes('@') && isValidEmail(email)) {
+      emails.add(email)
+    }
+  })
+
+  // Extract email patterns from page text
+  const text = $.text()
+  const emailPattern = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g
+  const matches = text.match(emailPattern) ?? []
+  for (const match of matches) {
+    const email = match.toLowerCase()
+    if (isValidEmail(email) && !email.includes('example') && !email.includes('placeholder')) {
+      emails.add(email)
+    }
+  }
+
+  // Prioritize emails from the target domain
+  const domainEmails = [...emails].filter((e) => e.endsWith(`@${domain}`) || e.endsWith(`@${domain.replace(/^www\./, '')}`))
+  const otherEmails = [...emails].filter((e) => !domainEmails.includes(e))
+
+  return [...domainEmails, ...otherEmails].slice(0, 10)
+}
+
+function isValidEmail(email: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) && email.length < 100
+}
+
+/**
+ * Probe multiple team page URL patterns in parallel.
+ * Returns the first URL that responds with useful content.
+ */
+export async function probeTeamPages(domain: string): Promise<{ url: string; html: string } | null> {
+  const urls = TEAM_PAGE_PATHS.map((path) => `https://${domain}${path}`)
+
+  // Try all in parallel, take first successful one with person-like content
+  const results = await Promise.allSettled(
+    urls.map(async (url) => {
+      const html = await fetchHtmlSafe(url)
+      if (!html) throw new Error('no content')
+      // Check if page has person-like content
+      const hasPersonContent = /\b(CEO|founder|director|manager|head of|marketing|content|editor)\b/i.test(html)
+        || /[A-Z][a-z]+ [A-Z][a-z]+/.test(html) // Has name-like patterns
+      if (!hasPersonContent) throw new Error('no person content')
+      return { url, html }
+    })
+  )
+
+  for (const r of results) {
+    if (r.status === 'fulfilled') return r.value
+  }
+
+  return null
 }
 
 /**

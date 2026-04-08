@@ -8,6 +8,13 @@
 import { prompt, type AIProvider } from '@/lib/ai/provider'
 import type { PitchIdea } from '@/lib/analysis/contentAnalyzer'
 
+export interface WriterProfile {
+  niches?: string
+  contentTypes?: string
+  writingStyle?: string
+  bio?: string
+}
+
 export interface DraftInput {
   contactName: string
   contactTitle: string
@@ -19,6 +26,7 @@ export interface DraftInput {
   channel: 'email' | 'linkedin'
   aiProvider: AIProvider
   aiModel?: string
+  writerProfile?: WriterProfile
 }
 
 export interface MessageDraft {
@@ -41,7 +49,8 @@ export async function draftMessage(input: DraftInput): Promise<MessageDraft> {
     pitches,
     channel,
     aiProvider,
-    aiModel = 'llama3.2',
+    aiModel = 'llama-3.3-70b-versatile',
+    writerProfile,
   } = input
 
   const firstName = contactName.split(' ')[0]
@@ -49,15 +58,21 @@ export async function draftMessage(input: DraftInput): Promise<MessageDraft> {
   const isAgency = companyType === 'agency'
   const wordLimit = isEmail ? '150-200 words' : '80-120 words (LinkedIn DM limit)'
 
-  const systemPrompt = `You are a freelance B2B/SaaS content writer crafting cold outreach messages. Your writing style is:
-- Conversational but professional
-- Specific and relevant (not generic)
-- Brief — you respect people's time
-- Focused on value to them, not your credentials
-- Curious, not pushy
-- Zero fluff, zero clichés like "I hope this finds you well" or "I'm reaching out because"
+  // Build writer identity from profile
+  const writerIdentity = writerProfile?.niches
+    ? `You are a freelance writer who specializes in ${writerProfile.niches}.${writerProfile.contentTypes ? ` You write ${writerProfile.contentTypes}.` : ''}${writerProfile.writingStyle ? ` Your style is ${writerProfile.writingStyle}.` : ''}`
+    : `You are a freelance B2B/SaaS content writer.`
 
-You write for B2B and B2C SaaS companies. You specialize in blog posts, thought leadership, and content strategy.`
+  const systemPrompt = `${writerIdentity}
+
+When writing cold outreach:
+- Sound like a real person, not a template
+- Be specific to THIS company — mention something real about them
+- Never open with "I hope this finds you well", "I'm reaching out because", or "My name is X"
+- Lead with something that shows you know their work or industry
+- Be brief and direct — respect their time
+- Your value is shown through insight, not credentials
+- End with a clear low-friction ask (a quick question, not "let me know if interested")`
 
   const pitchContext = pitches.length > 0
     ? `\n\nPitch ideas to reference (pick 1-2 most relevant):\n${pitches.map((p, i) => `${i + 1}. "${p.title}" — ${p.angle}`).join('\n')}`

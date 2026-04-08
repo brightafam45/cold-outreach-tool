@@ -4,7 +4,8 @@ import { draftMessage } from '@/lib/ai/drafter'
 
 export async function POST(req: NextRequest) {
   try {
-    const { searchId } = await req.json()
+    const body = await req.json()
+    const { searchId, writerProfile } = body
     const search = await prisma.search.findUniqueOrThrow({
       where: { id: searchId },
       include: { contacts: true, pitches: true },
@@ -28,7 +29,8 @@ export async function POST(req: NextRequest) {
           pitches,
           channel: 'email',
           aiProvider: 'groq',
-          aiModel: 'llama3.2',
+          aiModel: 'llama-3.3-70b-versatile',
+          writerProfile,
         }),
         draftMessage({
           contactName: contact.name,
@@ -40,7 +42,8 @@ export async function POST(req: NextRequest) {
           pitches,
           channel: 'linkedin',
           aiProvider: 'groq',
-          aiModel: 'llama3.2',
+          aiModel: 'llama-3.3-70b-versatile',
+          writerProfile,
         }),
       ])
 

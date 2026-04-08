@@ -4,10 +4,16 @@ import { findContacts } from '@/lib/contacts/contactFinder'
 
 export async function POST(req: NextRequest) {
   try {
-    const { searchId } = await req.json()
+    const body = await req.json()
+    const { searchId, writerProfile } = body
     const search = await prisma.search.findUniqueOrThrow({ where: { id: searchId } })
 
-    const contacts = await findContacts(search.input, 'groq', 'llama3.2', { skipEmailVerification: true })
+    const contacts = await findContacts(
+      search.input,
+      'groq',
+      'llama-3.3-70b-versatile',
+      { writerProfile }
+    )
 
     for (const c of contacts) {
       await prisma.contact.create({

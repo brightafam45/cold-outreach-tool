@@ -1,13 +1,11 @@
 /**
  * Content analyzer.
- * Scrapes and analyzes a company's blog, then uses AI to:
- * - Identify content gaps
- * - Find competitor content angles
- * - Generate pitch ideas
+ * Scrapes and analyzes a company's blog, then uses AI to generate pitch ideas.
+ * Writer profile context is used to personalize pitches.
  */
 
 import { scrapeBlog, type BlogPost } from '@/lib/scrapers/website'
-import { googleSearch, findCompetitors } from '@/lib/scrapers/google'
+import { bingSearch } from '@/lib/scrapers/bing'
 import { prompt, type AIProvider } from '@/lib/ai/provider'
 
 export interface ContentAnalysis {
@@ -24,6 +22,13 @@ export interface PitchIdea {
   angle: string
   rationale: string
   format: string
+}
+
+export interface WriterProfile {
+  niches?: string
+  contentTypes?: string
+  writingStyle?: string
+  bio?: string
 }
 
 /**
@@ -45,14 +50,16 @@ export async function analyzeCompanyContent(
     }
   }
 
-  // Try Google to find any published content
+  // Try Bing to find any published content if blog scrape failed
   if (blogPosts.length === 0) {
-    const results = await googleSearch(`${companyName} blog site:${companyName.toLowerCase().replace(/\s+/g, '')}.com`, 5)
-    blogPosts = results.map((r) => ({
-      title: r.title,
-      url: r.url,
-      excerpt: r.snippet,
-    }))
+    try {
+      const results = await bingSearch(`site:${companyName.toLowerCase().replace(/\s+/g, '')}.com blog`, 5)
+      blogPosts = results.map((r) => ({
+        title: r.title,
+        url: r.url,
+        excerpt: r.snippet,
+      }))
+    } catch { /* ignore */ }
   }
 
   // Extract topics
@@ -80,7 +87,7 @@ export async function analyzeCompanyContent(
 
 /**
  * Generate pitch ideas using AI.
- * Wears a content marketing strategist hat.
+ * Personalised using writer profile so pitches match the writer's actual niche.
  */
 export async function generatePitches(
   companyName: string,
@@ -88,55 +95,74 @@ export async function generatePitches(
   industry: string,
   existingTopics: string[],
   companyType: 'company' | 'agency',
-  aiProvider: AIProvider = 'ollama',
-  aiModel = 'llama3.2'
+  aiProvider: AIProvider = 'groq',
+  aiModel = 'llama-3.3-70b-versatile',
+  writerProfile?: WriterProfile
 ): Promise<PitchIdea[]> {
   const isAgency = companyType === 'agency'
 
-  const systemPrompt = `You are an expert content marketing strategist and freelance writer with 10+ years of experience writing for B2B and B2C SaaS companies. You specialize in finding content gaps, creating compelling pitch ideas, and helping writers land clients.
+  // Build writer context section
+  const writerContext = buildWriterContext(writerProfile)
 
-Your job is to analyze a company's content situation and generate specific, actionable pitch ideas that a freelance writer can use to approach the company. Be creative, specific, and think like both a marketer and a writer.`
+  const systemPrompt = `You are a working freelance content writer crafting pitch ideas for cold outreach. You have a distinct niche and point of view.
+
+${writerContext}
+
+CRITICAL RULES for pitch ideas:
+- Be SPECIFIC to this actual company — reference their real industry, product, or content
+- NO generic SaaS filler like "best practices", "complete guide", "how to scale"
+- NO placeholder text like "[Specific Industry]" or "[Company Name]"
+- Each pitch must name a real angle this company would care about
+- Think like a journalist finding a story angle, not like a marketer writing a brief
+- If you don't know their exact content, look at what their INDUSTRY needs right now`
+
+  const existingTopicsText = existingTopics.length > 0
+    ? `Their existing blog posts include: ${existingTopics.slice(0, 8).join(', ')}`
+    : `They may not have a blog yet, or their content is not publicly visible.`
 
   const userPrompt = isAgency
-    ? `I want to approach ${companyName}, a marketing/content agency, about freelance writing work.
+    ? `I want to approach ${companyName}, a ${industry} marketing/content agency, about freelance writing work.
 
-Company description: ${companyDescription}
-Industry: ${industry}
+Company: ${companyDescription}
 
-Since they're an agency, I DON'T want to pitch article ideas — they already have clients and briefs. Instead, I need 3-5 compelling reasons why they should hire me as a freelance writer. Focus on:
-- What value I bring as a specialist SaaS/tech writer
-- How I can make their team's work easier
-- What makes me different from their staff writers
-- Any service gaps an agency might have (overflow work, niche expertise, quick turnaround)
+Since they're an agency, I need compelling reasons to work with me — not content pitches for their clients. Generate 3-5 specific angles:
+- What overflow work or niche I can handle that frees up their team
+- Why a specialist writer (with my background) is better than a generalist for certain pieces
+- Concrete examples of the type of work I'd deliver
 
-Return a JSON array of pitch ideas in this exact format:
+Return ONLY a JSON array, no other text:
 [
   {
-    "title": "Short pitch angle headline",
-    "angle": "The specific hook or value proposition",
-    "rationale": "Why this works for an agency",
-    "format": "How to present this in the message"
+    "title": "Short pitch angle headline (max 10 words)",
+    "angle": "The specific hook or value proposition (1-2 sentences)",
+    "rationale": "Why this matters to an agency (1 sentence)",
+    "format": "How to position this in the outreach message"
   }
 ]`
     : `I want to pitch writing services to ${companyName}.
 
-Company description: ${companyDescription}
+Company: ${companyDescription}
 Industry: ${industry}
-Their existing blog topics: ${existingTopics.length > 0 ? existingTopics.join(', ') : 'Unknown — they may not have a blog yet'}
+${existingTopicsText}
 
-Generate 3-5 specific, creative pitch ideas I can use in my cold outreach. Think like a content strategist:
-- What topics are they likely missing?
-- What's trending in their industry that they haven't covered?
-- What content would drive leads or SEO for their business?
-- What's an out-of-the-box angle that would make a decision maker say "I never thought of that"?
+Generate 3-5 SPECIFIC pitch ideas I can use in cold outreach. Each idea should:
+- Be relevant to what ${companyName} actually sells or does
+- Address a real gap, trend, or opportunity in the ${industry} space RIGHT NOW
+- Be something a content editor would immediately want to commission
+- Feel like it came from someone who actually knows this industry
 
-Return a JSON array in this exact format:
+Do NOT write:
+- "The Ultimate Guide to [vague topic]"
+- "How [Company] Can Scale Their Content"
+- Any title with a placeholder in brackets
+
+Return ONLY a JSON array, no other text:
 [
   {
-    "title": "Specific article or content idea title",
-    "angle": "The unique hook or angle that makes this interesting",
-    "rationale": "Why this topic would benefit their business (SEO, leads, brand, etc.)",
-    "format": "Content type: blog post, case study, newsletter, comparison article, etc."
+    "title": "Specific, concrete article or content idea (not a template)",
+    "angle": "The unique hook that makes this interesting right now",
+    "rationale": "Why this drives business results for ${companyName} specifically",
+    "format": "Content type: long-form blog, case study, newsletter, data-driven piece, etc."
   }
 ]`
 
@@ -148,29 +174,34 @@ Return a JSON array in this exact format:
     if (!jsonMatch) return []
 
     const parsed = JSON.parse(jsonMatch[0]) as PitchIdea[]
-    return parsed.slice(0, 5)
+
+    // Filter out any pitches with obvious placeholder text
+    const filtered = parsed.filter((p) =>
+      !p.title.includes('[') &&
+      !p.title.toLowerCase().includes('specific industry') &&
+      !p.title.toLowerCase().includes('company name') &&
+      p.title.length > 5
+    )
+
+    return filtered.slice(0, 5)
   } catch {
     return []
   }
 }
 
 /**
- * Generate competitor analysis context.
+ * Build writer context string from profile.
  */
-export async function getCompetitorContext(
-  companyName: string,
-  industry: string
-): Promise<string> {
-  const competitors = await findCompetitors(companyName, industry)
-
-  if (competitors.length === 0) return ''
-
-  // Search for what competitors are writing about
-  const competitorTopics: string[] = []
-  for (const comp of competitors.slice(0, 2)) {
-    const results = await googleSearch(`${comp} blog content marketing`, 3)
-    results.forEach((r) => competitorTopics.push(r.title))
+function buildWriterContext(profile?: WriterProfile): string {
+  if (!profile || (!profile.niches && !profile.contentTypes && !profile.writingStyle && !profile.bio)) {
+    return 'You are a B2B/SaaS content writer with broad expertise.'
   }
 
-  return `Competitors: ${competitors.join(', ')}. Their content: ${competitorTopics.slice(0, 5).join('; ')}`
+  const parts: string[] = []
+  if (profile.niches) parts.push(`Your writing niche: ${profile.niches}`)
+  if (profile.contentTypes) parts.push(`Content types you write: ${profile.contentTypes}`)
+  if (profile.writingStyle) parts.push(`Your writing style: ${profile.writingStyle}`)
+  if (profile.bio) parts.push(`About you: ${profile.bio}`)
+
+  return parts.join('\n')
 }
